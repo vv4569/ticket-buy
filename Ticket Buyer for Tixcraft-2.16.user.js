@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ticket Buyer for Tixcraft
 // @namespace    http://tampermonkey.net/
-// @version      2.16
-// @description  Automate ticket buying on tixcraft.com (optimized with dynamic group fetching and MutationObserver)
+// @version      2.17
+// @description  Automate ticket buying on tixcraft.com (optimized for performance)
 // @author       You
 // @match        https://tixcraft.com/activity/detail/*
 // @match        https://tixcraft.com/activity/game/*
@@ -25,24 +25,25 @@
     // Configuration: Choose the event date, ticket quantity, and presale code
     const PREFERRED_DATE_TIME = '2025/04/20 (Sun.) 17:00'; // Matches the second date in the HTML
     const TICKET_QUANTITY = '1'; // Specify the number of tickets (e.g., '1' or '2')
-    const RELOAD_INTERVAL = 3000; // Reload every 3 seconds for other pages (e.g., detail page)
-    const MAX_RELOAD_ATTEMPTS = 350000; // Max 350,000 reloads (covers 4 days: 350,000 x 1 second on game page)
+    const RELOAD_INTERVAL = 1000; // Reduced to 1 second for faster reloads
+    const MAX_RELOAD_ATTEMPTS = 350000; // Max 350,000 reloads
     const PRESALE_CODE = 'BZ406060891'; // Presale code for /ticket/verify page
 
     // Wait for jQuery to load
     function waitForJQuery(callback) {
         if (typeof $ === 'undefined') {
             console.log("jQuery not loaded yet, waiting...");
-            setTimeout(() => waitForJQuery(callback), 500);
+            setTimeout(() => waitForJQuery(callback), 100); // Reduced delay
         } else {
             console.log("jQuery loaded, starting script...");
             callback();
         }
     }
 
-    // Utility function to wait for an element using MutationObserver
-    function waitForElementWithMutationObserver(selector, callback, timeout = 5000) {
-        const element = $(selector).filter(':visible');
+    // Optimized utility function to wait for an element using MutationObserver
+    function waitForElementWithMutationObserver(selector, parentSelector, callback, timeout = 2000) {
+        const parent = $(parentSelector).length ? $(parentSelector)[0] : document.body;
+        const element = $(selector, parent).filter(':visible');
         if (element.length) {
             console.log(`Element already exists: ${selector}`);
             callback(element);
@@ -50,7 +51,7 @@
         }
 
         const observer = new MutationObserver((mutations, obs) => {
-            const element = $(selector).filter(':visible');
+            const element = $(selector, parent).filter(':visible');
             if (element.length) {
                 console.log(`Element detected with MutationObserver: ${selector}`);
                 obs.disconnect();
@@ -58,7 +59,7 @@
             }
         });
 
-        observer.observe(document.body, {
+        observer.observe(parent, {
             childList: true,
             subtree: true,
             attributes: true,
@@ -89,7 +90,7 @@
         let reloadAttempts = 0;
 
         function checkForBuyNowButton() {
-            waitForElementWithMutationObserver(".buy a", (buyNowButton) => {
+            waitForElementWithMutationObserver(".buy a", "body", (buyNowButton) => {
                 if (buyNowButton) {
                     const href = buyNowButton.attr('href');
                     console.log(`Found '立即購票' button with href: ${href}`);
@@ -108,7 +109,7 @@
                         window.location.reload();
                     }, RELOAD_INTERVAL);
                 }
-            }, 1000);
+            }, 1000); // Reduced timeout
         }
 
         checkForBuyNowButton();
@@ -120,39 +121,30 @@
         let reloadAttempts = 0;
 
         function checkForDateAndButton() {
-            waitForElementWithMutationObserver("#gameList tr", () => {
+            waitForElementWithMutationObserver("#gameList tr", "#gameList", () => {
                 console.log("Game list table rows loaded, looking for date row...");
 
-                // Normalize the preferred date by replacing multiple spaces with a single space
+                // Cache the rows to avoid multiple DOM queries
+                const rows = $("#gameList tr");
                 const normalizedPreferredDate = PREFERRED_DATE_TIME.replace(/\s+/g, ' ');
 
-                // First attempt: Use jQuery selector to find the row directly
-                const rowSelector = `#gameList tr:has(td:first:contains('${normalizedPreferredDate}'))`;
-                let targetRow = $(rowSelector);
-
-                // Debug: Log the text of each row's first <td> to see what we're matching against
-                $("#gameList tr").each(function() {
+                // Debug: Log the text of each row's first <td>
+                rows.each(function() {
                     const dateText = $(this).find('td').first().text().trim().replace(/\s+/g, ' ');
                     console.log(`Row date text: '${dateText}'`);
                 });
 
-                // If the selector didn't find the row, fall back to manual comparison
-                if (!targetRow.length) {
-                    console.log("jQuery selector failed, falling back to manual comparison...");
-                    $("#gameList tr").each(function() {
-                        const dateText = $(this).find('td').first().text().trim().replace(/\s+/g, ' ');
-                        if (dateText === normalizedPreferredDate) {
-                            targetRow = $(this);
-                            return false; // Break the loop
-                        }
-                    });
-                }
+                // Find the target row directly with normalized comparison
+                const targetRow = rows.filter(function() {
+                    const dateText = $(this).find('td').first().text().trim().replace(/\s+/g, ' ');
+                    return dateText === normalizedPreferredDate;
+                });
 
                 if (targetRow.length) {
                     const dateKey = targetRow.attr('data-key');
                     console.log(`Found preferred date '${PREFERRED_DATE_TIME}' with data-key=${dateKey}`);
                     const dateButtonSelector = `tr[data-key='${dateKey}'] .btn-primary`;
-                    waitForElementWithMutationObserver(dateButtonSelector, (dateButton) => {
+                    waitForElementWithMutationObserver(dateButtonSelector, "#gameList", (dateButton) => {
                         if (dateButton) {
                             const href = dateButton.attr('data-href');
                             console.log(`Found 'Find tickets' button with data-href: ${href}`);
@@ -166,10 +158,9 @@
                                 return;
                             }
                             console.log(`Find tickets button not found for '${PREFERRED_DATE_TIME}', reloading page immediately (Attempt ${reloadAttempts}/${MAX_RELOAD_ATTEMPTS})...`);
-                            console.log("Reloading page now...");
                             window.location.reload();
                         }
-                    }, 1000);
+                    }, 1000); // Reduced timeout
                 } else {
                     reloadAttempts++;
                     if (reloadAttempts >= MAX_RELOAD_ATTEMPTS) {
@@ -183,7 +174,7 @@
                         window.location.reload();
                     }, RELOAD_INTERVAL);
                 }
-            }, 5000);
+            }, 2000); // Reduced timeout
         }
 
         checkForDateAndButton();
@@ -192,7 +183,7 @@
     // Step 2.5: On the verify page, enter the presale code and submit
     function handleVerifyPage() {
         console.log("On verify page, entering presale code...");
-        waitForElementWithMutationObserver("input[name='checkCode']", (codeInput) => {
+        waitForElementWithMutationObserver("input[name='checkCode']", "body", (codeInput) => {
             if (!codeInput) {
                 console.log("Presale code input field not found, please inspect the input field and share its HTML.");
                 isScriptRunning = false;
@@ -201,7 +192,7 @@
             codeInput.val(PRESALE_CODE);
             console.log(`Entered presale code: ${PRESALE_CODE}`);
 
-            waitForElementWithMutationObserver("#form-ticket-verify button[type='submit'], .btn-primary:contains('Submit')", (submitButton) => {
+            waitForElementWithMutationObserver("#form-ticket-verify button[type='submit'], .btn-primary:contains('Submit')", "body", (submitButton) => {
                 if (!submitButton) {
                     console.log("Submit button not found on verify page, please inspect the button and share its HTML.");
                     isScriptRunning = false;
@@ -209,8 +200,8 @@
                 }
                 submitButton.click();
                 console.log("Submit button clicked on verify page");
-            }, 5000);
-        }, 5000);
+            }, 1000); // Reduced timeout
+        }, 1000); // Reduced timeout
     }
 
     // Step 3: On the ticket area page, start from group_2, then group_3, group_4, and so on
@@ -246,13 +237,14 @@
         const remainingGroups = sortedGroups.filter(g => g.groupNumber >= 3); // Start from group_3
 
         // Function to process a single group
-        function processGroup(group) {
+        function processGroup(group, callback) {
             const groupId = group.id;
             console.log(`Checking seat group: ${groupId} (${group.price})...`);
 
-            waitForElementWithMutationObserver(`#${groupId} li a`, (ticketLinks) => {
+            waitForElementWithMutationObserver(`#${groupId} li a`, `#${groupId}`, (ticketLinks) => {
                 if (!ticketLinks || ticketLinks.length === 0) {
                     console.log(`No ticket links found in group ${groupId}, skipping...`);
+                    callback(false);
                     return;
                 }
 
@@ -273,53 +265,63 @@
                         window.location.href = href;
                     } else {
                         console.log("Seat link has no href or uses JavaScript, simulating click...");
-                        setTimeout(() => {
-                            simulateClick(availableTicket[0]);
-                        }, 500);
+                        simulateClick(availableTicket[0]);
                     }
-                    foundAvailableTicket = true;
+                    callback(true);
                 } else {
                     console.log(`All tickets in ${groupId} are sold out, checking next group...`);
+                    callback(false);
                 }
-            }, 5000); // Wait up to 5 seconds
+            }, 1000); // Reduced timeout
         }
 
+        // Process groups sequentially without staggering delays
         let foundAvailableTicket = false;
 
         // Check group_2 first
         if (group2Data) {
             console.log("Prioritizing group_2...");
-            processGroup(group2Data);
+            processGroup(group2Data, (found) => {
+                foundAvailableTicket = found;
+                if (!foundAvailableTicket) {
+                    checkRemainingGroups();
+                }
+            });
         } else {
             console.log("group_2 not found, proceeding with remaining groups...");
+            checkRemainingGroups();
         }
 
-        // If no ticket found in group_2, check group_3, group_4, and so on
-        setTimeout(() => {
-            if (!foundAvailableTicket) {
-                remainingGroups.forEach((group, index) => {
-                    if (foundAvailableTicket) return; // Stop if a ticket was found
-                    setTimeout(() => {
-                        if (!foundAvailableTicket) processGroup(group);
-                    }, index * 6000); // Stagger each group by 6 seconds
+        // Check remaining groups sequentially
+        function checkRemainingGroups() {
+            let currentIndex = 0;
+
+            function processNextGroup() {
+                if (currentIndex >= remainingGroups.length || foundAvailableTicket) {
+                    if (!foundAvailableTicket) {
+                        console.log("No available tickets found in any group, stopping.");
+                        isScriptRunning = false;
+                    }
+                    return;
+                }
+
+                const group = remainingGroups[currentIndex];
+                processGroup(group, (found) => {
+                    foundAvailableTicket = found;
+                    currentIndex++;
+                    processNextGroup();
                 });
             }
-        }, 6000); // Wait after group_2 check
 
-        // Final fallback if no tickets are found
-        setTimeout(() => {
-            if (!foundAvailableTicket) {
-                console.log("No available tickets found in any group, stopping.");
-                isScriptRunning = false;
-            }
-        }, 6000 + remainingGroups.length * 6000); // Adjust timeout based on number of groups
+            processNextGroup();
+        }
     }
 
     // Step 4: On the ticket quantity page, select quantity and check terms
     function handleTicketQuantityPage() {
         console.log("On ticket quantity page, selecting quantity and checking terms...");
 
-        waitForElementWithMutationObserver("select[name*='ticketPrice'], #ticketPriceList select", (quantitySelect) => {
+        waitForElementWithMutationObserver("select[name*='ticketPrice'], #ticketPriceList select", "body", (quantitySelect) => {
             if (!quantitySelect) {
                 console.log("Ticket quantity dropdown not found, please inspect the dropdown and share its HTML.");
                 isScriptRunning = false;
@@ -329,7 +331,7 @@
             quantitySelect.trigger("change");
             console.log(`Selected ticket quantity: ${TICKET_QUANTITY}`);
 
-            waitForElementWithMutationObserver("input[type='checkbox']", (checkbox) => {
+            waitForElementWithMutationObserver("input[type='checkbox']", "body", (checkbox) => {
                 if (!checkbox) {
                     console.log("Terms of Use checkbox not found, please inspect the checkbox and share its HTML.");
                     isScriptRunning = false;
@@ -339,8 +341,8 @@
                 console.log("Checked Terms of Use checkbox");
                 console.log("Script stopped. Please manually click the 'Submit' button, enter the CAPTCHA code, and click 'Verify'.");
                 isScriptRunning = false;
-            }, 5000);
-        }, 5000);
+            }, 1000); // Reduced timeout
+        }, 1000); // Reduced timeout
     }
 
     // Main function to determine the current page and execute the appropriate step
